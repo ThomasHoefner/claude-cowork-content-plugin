@@ -3,50 +3,38 @@
   "nodes": [
     {
       "parameters": {
-        "pollTimes": {
-          "item": [
-            {
-              "mode": "everyMinute"
-            }
-          ]
-        },
-        "triggerField": "Date Observed",
-        "additionalFields": {},
-        "baseId": "={{ $vars.AIRTABLE_BASE_ID }}",
-        "tableId": "Waste Observation"
-      },
-      "id": "1a2b3c4d-0001-4a00-8000-000000000001",
-      "name": "Airtable Trigger: New Waste Observation",
-      "type": "n8n-nodes-base.airtableTrigger",
-      "typeVersion": 1,
-      "position": [
-        -400,
-        0
-      ],
-      "credentials": {
-        "airtableTokenApi": {
-          "id": "airtable_pat",
-          "name": "Airtable Personal Access Token"
+        "httpMethod": "POST",
+        "path": "gemba-walk",
+        "options": {
+          "responseData": "firstEntryJson"
         }
       },
-      "notes": "Pollt die Tabelle 'Waste Observation' und triggert bei neuen Records. Alternativ kann auch ein Webhook aus Airtable Automations verwendet werden."
+      "id": "1a2b3c4d-0001-4a00-8000-000000000001",
+      "name": "Webhook: Airtable Automation",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        0
+      ],
+      "webhookId": "gemba-walk-webhook",
+      "notes": "Empfängt POST aus einer Airtable-Automation vom Typ 'When record created → Run script'. Erwartetes Body-Schema: { recordId, fields }."
     },
     {
       "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "loose"
           },
           "conditions": [
             {
               "id": "has-photo",
-              "leftValue": "={{ $json.fields.Photos }}",
-              "rightValue": "",
+              "leftValue": "={{ ($json.body.fields.Photos || []).length }}",
+              "rightValue": 0,
               "operator": {
-                "type": "array",
-                "operation": "notEmpty"
+                "type": "number",
+                "operation": "gt"
               }
             }
           ],
@@ -55,50 +43,114 @@
         "options": {}
       },
       "id": "1a2b3c4d-0002-4a00-8000-000000000002",
-      "name": "IF: Foto vorhanden?",
+      "name": "IF: Fotos vorhanden?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -180,
+        -700,
         0
+      ],
+      "notes": "Wenn keine Fotos angehängt sind, läuft der Workflow über den FALSE-Pfad und Claude analysiert ausschließlich den Text."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.fields.Photos",
+        "include": "noOtherFields",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0003-4a00-8000-000000000003",
+      "name": "Split: Einzelne Fotos",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -180
       ]
     },
     {
       "parameters": {
-        "url": "={{ $json.fields.Photos[0].url }}",
+        "url": "={{ $json.url }}",
         "options": {
           "response": {
             "response": {
-              "responseFormat": "file"
+              "responseFormat": "file",
+              "outputPropertyName": "data"
             }
           }
         }
       },
-      "id": "1a2b3c4d-0003-4a00-8000-000000000003",
+      "id": "1a2b3c4d-0004-4a00-8000-000000000004",
       "name": "HTTP: Foto herunterladen",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        60,
-        -120
+        -300,
+        -180
       ],
-      "notes": "Lädt das erste Foto aus dem Attachment-Feld als Binary."
+      "notes": "Lädt jedes Foto einzeln als Binary herunter (läuft pro Item aus dem Split)."
     },
     {
       "parameters": {
-        "operation": "toBase64",
-        "binaryPropertyName": "data",
+        "jsCode": "// Wandle jede heruntergeladene Binary in einen Anthropic-Image-Content-Block um.\n// n8n speichert Binary-Data bereits als base64-String → wir können sie direkt verwenden.\nreturn $input.all().map(item => {\n  const bin = (item.binary && item.binary.data) || {};\n  return {\n    json: {\n      image_block: {\n        type: 'image',\n        source: {\n          type: 'base64',\n          media_type: bin.mimeType || 'image/jpeg',\n          data: bin.data || ''\n        }\n      }\n    }\n  };\n});\n"
+      },
+      "id": "1a2b3c4d-0005-4a00-8000-000000000005",
+      "name": "Code: Image-Block bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateIndividualFields",
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "image_block",
+              "renameField": true,
+              "outputFieldName": "images"
+            }
+          ]
+        },
         "options": {}
       },
-      "id": "1a2b3c4d-0004-4a00-8000-000000000004",
-      "name": "Binary → Base64",
-      "type": "n8n-nodes-base.extractFromFile",
+      "id": "1a2b3c4d-0006-4a00-8000-000000000006",
+      "name": "Aggregate: Fotos kombinieren",
+      "type": "n8n-nodes-base.aggregate",
       "typeVersion": 1,
       "position": [
-        280,
-        -120
+        100,
+        -180
       ],
-      "notes": "Wandelt die Bilddatei in Base64 um, damit sie an die Claude API geschickt werden kann."
+      "notes": "Fasst alle Image-Blocks zu einem Array zusammen, damit Claude sie in einem einzigen Call sieht."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Kein Foto am Record → leeres Image-Array, Claude analysiert nur den Text.\nreturn [{ json: { images: [] } }];\n"
+      },
+      "id": "1a2b3c4d-0007-4a00-8000-000000000007",
+      "name": "Code: Kein Foto (Text-only)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Baut den vollständigen Anthropic-Messages-Request zusammen.\n// - images: 0..n Image-Blocks aus dem TRUE-Pfad (oder [] aus dem FALSE-Pfad)\n// - Beobachtungs-Kontext aus dem Webhook-Body\nconst images = $json.images || [];\nconst webhook = $('Webhook: Airtable Automation').first().json.body || {};\nconst fields  = webhook.fields || {};\n\nconst hasImages = images.length > 0;\nconst text = `Du bist ein Lean-Experte und EHS-Beauftragter. Analysiere die folgende Gemba-Walk-Beobachtung${\n  hasImages\n    ? ` zusammen mit den ${images.length} beigefügten Foto(s)`\n    : ' ausschließlich anhand des Textes (es liegen keine Fotos vor)'\n}.\n\nBeobachtung: ${fields['Waste Observation Name'] || 'Unbenannt'}\nOrt: ${fields.Location || 'unbekannt'}\nWaste Type: ${fields['Waste Type'] || 'unbekannt'}\nImpact: ${fields.Impact || 'unbekannt'}\nPriorität (gemeldet): ${fields.Priority || 'unbekannt'}\nEHS Concern: ${fields['EHS Concern'] ? 'ja' : 'nein'}\nEHS Focus: ${fields['EHS Focus'] || 'n/a'}\nBeschreibung / Notes: ${fields['Description / Notes'] || ''}\nBeobachter: ${fields.Observer || 'unbekannt'}\n\nIdentifiziere das Problem, die wahrscheinliche Ursache (5-Why / Ishikawa) und schlage 1-3 konkrete Maßnahmen mit Rollen als Verantwortliche vor.\n\nAntworte AUSSCHLIESSLICH als gültiges JSON in genau diesem Schema (keine Markdown-Fences, kein Fließtext):\n{\n  \"ai_analysis\": \"Strukturierte Analyse inkl. erkennbarer EHS-/Lean-Themen (max. 600 Zeichen)\",\n  \"root_cause\": \"Vermutete Grundursache (eine Zeile)\",\n  \"solution_approach\": \"Empfohlener Lösungsansatz (max. 400 Zeichen)\",\n  \"priority\": \"Low|Middle|High\",\n  \"actions\": [\n    {\n      \"description\": \"Konkrete Handlung (SMART formuliert)\",\n      \"notes\": \"Hintergrund / Umsetzungshinweis\",\n      \"owner_role\": \"Rolle EXAKT aus folgender Liste (muss mit dem Feld 'Role' in der Users-Tabelle übereinstimmen): Shopfloor-Leiter | EHS-Manager | Instandhaltung | Lagerleitung | Qualitätsmanagement\",\n      \"deliverable_days\": 7\n    }\n  ]\n}`;\n\nconst content = [...images, { type: 'text', text }];\n\nreturn [{\n  json: {\n    body: {\n      model: 'claude-opus-4-6',\n      max_tokens: 1500,\n      messages: [{ role: 'user', content }]\n    }\n  }\n}];\n"
+      },
+      "id": "1a2b3c4d-0008-4a00-8000-000000000008",
+      "name": "Code: Claude-Request bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        0
+      ]
     },
     {
       "parameters": {
@@ -121,16 +173,18 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"claude-opus-4-6\",\n  \"max_tokens\": 1500,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"image\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"{{ $binary.data.mimeType || 'image/jpeg' }}\",\n            \"data\": \"{{ $json.data }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"Du bist ein Lean-Experte und EHS-Beauftragter. Analysiere dieses Gemba-Walk-Foto zusammen mit der folgenden Beobachtung.\\n\\nBeobachtung: {{ $('Airtable Trigger: New Waste Observation').item.json.fields['Waste Observation Name'] || 'Unbenannt' }}\\nOrt: {{ $('Airtable Trigger: New Waste Observation').item.json.fields.Location || 'unbekannt' }}\\nWaste Type: {{ $('Airtable Trigger: New Waste Observation').item.json.fields['Waste Type'] || 'unbekannt' }}\\nImpact: {{ $('Airtable Trigger: New Waste Observation').item.json.fields.Impact || 'unbekannt' }}\\nBeschreibung: {{ $('Airtable Trigger: New Waste Observation').item.json.fields['Description / Notes'] || '' }}\\nBeobachter: {{ $('Airtable Trigger: New Waste Observation').item.json.fields.Observer || 'unbekannt' }}\\n\\nIdentifiziere das Problem, die wahrscheinliche Ursache (5-Why bzw. Ishikawa-Kategorie) und schlage 1-3 konkrete Maßnahmen mit Verantwortlichkeiten vor.\\n\\nAntworte AUSSCHLIESSLICH als gültiges JSON in genau diesem Schema (keine Markdown-Fences, kein Fließtext):\\n{\\n  \\\"ai_analysis\\\": \\\"Kurze strukturierte Analyse des Problems inkl. erkennbarer EHS-/Lean-Themen (max. 600 Zeichen)\\\",\\n  \\\"root_cause\\\": \\\"Vermutete Grundursache (eine Zeile)\\\",\\n  \\\"solution_approach\\\": \\\"Empfohlener Lösungsansatz für das Waste-Observation-Record (max. 400 Zeichen)\\\",\\n  \\\"priority\\\": \\\"Low|Middle|High\\\",\\n  \\\"actions\\\": [\\n    {\\n      \\\"description\\\": \\\"Konkrete Handlung (SMART formuliert)\\\",\\n      \\\"notes\\\": \\\"Hintergrund / Umsetzungshinweis\\\",\\n      \\\"owner_role\\\": \\\"Rolle oder Funktion (z.B. 'Shopfloor-Leiter', 'EHS-Manager')\\\",\\n      \\\"deliverable_days\\\": 7\\n    }\\n  ]\\n}\"\n        }\n      ]\n    }\n  ]\n}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 60000
+        }
       },
-      "id": "1a2b3c4d-0005-4a00-8000-000000000005",
-      "name": "Claude: Bild + Text analysieren",
+      "id": "1a2b3c4d-0009-4a00-8000-000000000009",
+      "name": "Claude: Messages API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        500,
-        -120
+        540,
+        0
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -138,19 +192,19 @@
           "name": "Anthropic API Key (Header: x-api-key)"
         }
       },
-      "notes": "Sendet Foto (base64) + Beobachtung an die Claude Messages API. Modell: claude-opus-4-6. Credential muss Header 'x-api-key' mit dem API-Key setzen."
+      "notes": "Ein einziger Messages-Call. Enthält alle Bilder (falls vorhanden) und den Prompt. Modell: claude-opus-4-6."
     },
     {
       "parameters": {
-        "jsCode": "// Parsed Claude response → flat fields for downstream nodes\nconst item = $input.first().json;\n\n// Anthropic Messages API returns { content: [{ type: 'text', text: '...' }], ... }\nconst raw = (item.content && item.content[0] && item.content[0].text) || item.completion || '';\n\nlet parsed;\ntry {\n  // strip potential markdown fences just in case\n  const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();\n  parsed = JSON.parse(cleaned);\n} catch (err) {\n  throw new Error('Claude hat kein gültiges JSON geliefert: ' + raw);\n}\n\n// Build output\nreturn [{\n  json: {\n    ai_analysis: parsed.ai_analysis || '',\n    root_cause: parsed.root_cause || '',\n    solution_approach: parsed.solution_approach || '',\n    priority: parsed.priority || 'Middle',\n    actions: Array.isArray(parsed.actions) ? parsed.actions : []\n  }\n}];\n"
+        "jsCode": "// Parsed Claude-Response → flache Felder für die nachfolgenden Nodes.\nconst item = $input.first().json;\nconst raw  = (item.content && item.content[0] && item.content[0].text) || '';\n\nlet parsed;\ntry {\n  // Markdown-Fences vorsichtshalber entfernen\n  const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (err) {\n  throw new Error('Claude hat kein gültiges JSON geliefert: ' + raw);\n}\n\nreturn [{\n  json: {\n    ai_analysis: parsed.ai_analysis || '',\n    root_cause: parsed.root_cause || '',\n    solution_approach: parsed.solution_approach || '',\n    priority: parsed.priority || 'Middle',\n    actions: Array.isArray(parsed.actions) ? parsed.actions : []\n  }\n}];\n"
       },
-      "id": "1a2b3c4d-0006-4a00-8000-000000000006",
+      "id": "1a2b3c4d-0010-4a00-8000-000000000010",
       "name": "Code: JSON parsen",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        720,
-        -120
+        760,
+        0
       ]
     },
     {
@@ -166,7 +220,7 @@
           "value": "Waste Observation",
           "mode": "name"
         },
-        "id": "={{ $('Airtable Trigger: New Waste Observation').item.json.id }}",
+        "id": "={{ $('Webhook: Airtable Automation').first().json.body.recordId }}",
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
@@ -180,13 +234,13 @@
         },
         "options": {}
       },
-      "id": "1a2b3c4d-0007-4a00-8000-000000000007",
+      "id": "1a2b3c4d-0011-4a00-8000-000000000011",
       "name": "Airtable: Waste Observation updaten",
       "type": "n8n-nodes-base.airtable",
       "typeVersion": 2.1,
       "position": [
-        940,
-        -120
+        980,
+        0
       ],
       "credentials": {
         "airtableTokenApi": {
@@ -201,15 +255,49 @@
         "include": "allOtherFields",
         "options": {}
       },
-      "id": "1a2b3c4d-0008-4a00-8000-000000000008",
+      "id": "1a2b3c4d-0012-4a00-8000-000000000012",
       "name": "Split: Actions",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        1160,
-        -120
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "={{ $vars.AIRTABLE_BASE_ID }}",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Users",
+          "mode": "name"
+        },
+        "returnAll": false,
+        "limit": 1,
+        "filterByFormula": "=AND({Role}='{{ $json.actions.owner_role }}', OR({Active}=TRUE(), {Active}=BLANK()))",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0013-4a00-8000-000000000013",
+      "name": "Airtable: User per Rolle finden",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1420,
+        0
       ],
-      "notes": "Teilt das actions-Array aus dem Claude-Response in einzelne Items auf, damit pro Action ein Airtable-Record erzeugt wird."
+      "alwaysOutputData": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable_pat",
+          "name": "Airtable Personal Access Token"
+        }
+      },
+      "notes": "Lookup der Rolle, die Claude in 'owner_role' liefert, gegen eine Users-Tabelle. Erwartete Felder: Name (Text), Role (Single-Select – gleiche Werte wie im Prompt), Email (Text), Active (Checkbox, optional). alwaysOutputData=true sorgt dafür, dass der Workflow auch dann weiterläuft, wenn keine Rolle gematcht werden konnte (dann wird der Owner leer gelassen und Fallback-Mail ans EHS-Team geschickt)."
     },
     {
       "parameters": {
@@ -227,50 +315,51 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Action Description": "={{ $json.actions.description }}",
-            "Action Notes": "={{ $json.actions.notes }}",
-            "Waste Observation": "={{ [$('Airtable Trigger: New Waste Observation').item.json.id] }}",
-            "Owner": "={{ $json.actions.owner_role }}",
-            "Priority": "={{ $json.priority }}",
+            "Action Description": "={{ $('Split: Actions').item.json.actions.description }}",
+            "Action Notes": "={{ $('Split: Actions').item.json.actions.notes }}",
+            "Waste Observation": "={{ [$('Webhook: Airtable Automation').first().json.body.recordId] }}",
+            "Owner": "={{ $json.id ? [$json.id] : [] }}",
+            "Priority": "={{ $('Code: JSON parsen').item.json.priority }}",
             "Status": "Not Started",
-            "Deliverable Date": "={{ $now.plus({ days: $json.actions.deliverable_days || 7 }).toISO() }}"
+            "Deliverable Date": "={{ $now.plus({ days: $('Split: Actions').item.json.actions.deliverable_days || 7 }).toISO() }}"
           }
         },
         "options": {
           "typecast": true
         }
       },
-      "id": "1a2b3c4d-0009-4a00-8000-000000000009",
+      "id": "1a2b3c4d-0014-4a00-8000-000000000014",
       "name": "Airtable: Action Item anlegen",
       "type": "n8n-nodes-base.airtable",
       "typeVersion": 2.1,
       "position": [
-        1380,
-        -120
+        1640,
+        0
       ],
       "credentials": {
         "airtableTokenApi": {
           "id": "airtable_pat",
           "name": "Airtable Personal Access Token"
         }
-      }
+      },
+      "notes": "Owner ist als Linked-Record zur Users-Tabelle modelliert. Falls der Lookup keinen Treffer hatte, bleibt Owner leer."
     },
     {
       "parameters": {
         "fromEmail": "gemba-bot@example.com",
-        "toEmail": "={{ $json.actions.owner_email || 'ehs-team@example.com' }}",
-        "subject": "=Neue Gemba-Walk-Maßnahme: {{ $json.actions.description }}",
+        "toEmail": "={{ ($('Airtable: User per Rolle finden').item.json.fields && $('Airtable: User per Rolle finden').item.json.fields.Email) || 'ehs-team@example.com' }}",
+        "subject": "=Neue Gemba-Walk-Maßnahme: {{ $('Split: Actions').item.json.actions.description }}",
         "emailFormat": "html",
-        "html": "=<p>Hallo {{ $json.actions.owner_role }},</p>\n<p>aus dem Gemba-Walk vom <strong>{{ $('Airtable Trigger: New Waste Observation').item.json.fields['Date Observed'] }}</strong> (Ort: {{ $('Airtable Trigger: New Waste Observation').item.json.fields.Location }}) wurde dir folgende Maßnahme zugewiesen:</p>\n<ul>\n  <li><strong>Maßnahme:</strong> {{ $json.actions.description }}</li>\n  <li><strong>Hintergrund:</strong> {{ $json.actions.notes }}</li>\n  <li><strong>Priorität:</strong> {{ $json.priority }}</li>\n  <li><strong>Fällig bis:</strong> {{ $now.plus({ days: $json.actions.deliverable_days || 7 }).toFormat('dd.MM.yyyy') }}</li>\n</ul>\n<p><strong>KI-Analyse:</strong><br>{{ $json.ai_analysis }}</p>\n<p><strong>Lösungsansatz:</strong><br>{{ $json.solution_approach }}</p>\n<p>Bitte pflege den Fortschritt direkt im Airtable-Record.</p>",
+        "html": "=<p>Hallo {{ ($('Airtable: User per Rolle finden').item.json.fields && $('Airtable: User per Rolle finden').item.json.fields.Name) || $('Split: Actions').item.json.actions.owner_role }},</p>\n<p>aus dem Gemba-Walk am <strong>{{ $('Webhook: Airtable Automation').first().json.body.fields['Date Observed'] }}</strong> (Ort: {{ $('Webhook: Airtable Automation').first().json.body.fields.Location }}) wurde dir folgende Maßnahme zugewiesen:</p>\n<ul>\n  <li><strong>Maßnahme:</strong> {{ $('Split: Actions').item.json.actions.description }}</li>\n  <li><strong>Hintergrund:</strong> {{ $('Split: Actions').item.json.actions.notes }}</li>\n  <li><strong>Priorität:</strong> {{ $('Code: JSON parsen').item.json.priority }}</li>\n  <li><strong>Fällig bis:</strong> {{ $now.plus({ days: $('Split: Actions').item.json.actions.deliverable_days || 7 }).toFormat('dd.MM.yyyy') }}</li>\n</ul>\n<p><strong>KI-Analyse:</strong><br>{{ $('Code: JSON parsen').item.json.ai_analysis }}</p>\n<p><strong>Root Cause:</strong> {{ $('Code: JSON parsen').item.json.root_cause }}</p>\n<p><strong>Lösungsansatz:</strong><br>{{ $('Code: JSON parsen').item.json.solution_approach }}</p>\n<p>Bitte pflege den Fortschritt direkt im Airtable-Record.</p>",
         "options": {}
       },
-      "id": "1a2b3c4d-0010-4a00-8000-000000000010",
+      "id": "1a2b3c4d-0015-4a00-8000-000000000015",
       "name": "E-Mail: Verantwortliche benachrichtigen",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        1600,
-        -120
+        1860,
+        0
       ],
       "credentials": {
         "smtp": {
@@ -279,37 +368,70 @@
         }
       },
       "continueOnFail": true,
-      "notes": "Optional. Empfängeradresse sollte idealerweise aus einem 'Users'-Lookup in Airtable kommen, hier zur Vereinfachung per Rolle + Fallback an das EHS-Team."
+      "notes": "Fallback: Wenn kein User gefunden wurde, geht die Mail an 'ehs-team@example.com'."
     },
     {
       "parameters": {
-        "content": "### Hinweise\n1. Lege in n8n folgende Credentials an:\n   - **Airtable Personal Access Token** mit Scope `data.records:read/write` auf die Base.\n   - **HTTP Header Auth** für Anthropic (`x-api-key: <dein Key>`).\n   - **SMTP Account** für Mail-Versand.\n2. Setze die Variable `AIRTABLE_BASE_ID` unter *Settings → Variables*.\n3. Tabellen müssen exakt `Waste Observation` und `Action Items` heißen; Feldnamen entsprechen dem CSV-Export.\n4. Der Trigger pollt per Default alle 60s – für Echtzeit kann alternativ eine Airtable-Automation einen Webhook-Trigger anstoßen.",
-        "height": 260,
-        "width": 520
+        "content": "### Setup\n1. Credentials anlegen:\n   - **Airtable Personal Access Token** (Scopes: data.records:read/write, schema.bases:read)\n   - **HTTP Header Auth** für Anthropic: Header `x-api-key` = API-Key\n   - **SMTP Account** für Mail\n2. n8n-Variable `AIRTABLE_BASE_ID` setzen.\n3. Tabellen in Airtable:\n   - `Waste Observation` (inkl. Felder AI Analysis, Solution Approach, Status mit Option 'Analyzed')\n   - `Action Items` (Owner als Linked-Record zu 'Users')\n   - `Users` mit Feldern: Name (Text), Role (Single-Select), Email (Text), optional Active (Checkbox)\n4. In Airtable eine Automation 'When record created' → 'Run script' anlegen, die den Webhook aufruft. Beispielskript im README.\n5. Webhook-URL aus dem Trigger-Node in die Automation eintragen (Production-URL verwenden).",
+        "height": 320,
+        "width": 560
       },
-      "id": "1a2b3c4d-0011-4a00-8000-000000000011",
+      "id": "1a2b3c4d-0016-4a00-8000-000000000016",
       "name": "Sticky Note: Setup",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -400,
-        -320
+        -900,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Daten-Fluss\n- **TRUE-Pfad**: Fotos werden einzeln geladen, als base64 zu Image-Content-Blocks verpackt und zu einem Array aggregiert → alle Bilder in einem Claude-Call.\n- **FALSE-Pfad**: Kein Foto → `images = []` → Claude bekommt nur den Text-Prompt (mit ausdrücklichem Hinweis, dass keine Fotos vorliegen).\n- Beide Pfade münden in 'Code: Claude-Request bauen'.",
+        "height": 220,
+        "width": 520
+      },
+      "id": "1a2b3c4d-0017-4a00-8000-000000000017",
+      "name": "Sticky Note: Pfade",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -500,
+        -500
       ]
     }
   ],
   "connections": {
-    "Airtable Trigger: New Waste Observation": {
+    "Webhook: Airtable Automation": {
       "main": [
         [
           {
-            "node": "IF: Foto vorhanden?",
+            "node": "IF: Fotos vorhanden?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF: Foto vorhanden?": {
+    "IF: Fotos vorhanden?": {
+      "main": [
+        [
+          {
+            "node": "Split: Einzelne Fotos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Kein Foto (Text-only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split: Einzelne Fotos": {
       "main": [
         [
           {
@@ -317,33 +439,65 @@
             "type": "main",
             "index": 0
           }
-        ],
-        []
+        ]
       ]
     },
     "HTTP: Foto herunterladen": {
       "main": [
         [
           {
-            "node": "Binary → Base64",
+            "node": "Code: Image-Block bauen",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Binary → Base64": {
+    "Code: Image-Block bauen": {
       "main": [
         [
           {
-            "node": "Claude: Bild + Text analysieren",
+            "node": "Aggregate: Fotos kombinieren",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Claude: Bild + Text analysieren": {
+    "Aggregate: Fotos kombinieren": {
+      "main": [
+        [
+          {
+            "node": "Code: Claude-Request bauen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Kein Foto (Text-only)": {
+      "main": [
+        [
+          {
+            "node": "Code: Claude-Request bauen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Claude-Request bauen": {
+      "main": [
+        [
+          {
+            "node": "Claude: Messages API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: Messages API": {
       "main": [
         [
           {
@@ -377,6 +531,17 @@
       ]
     },
     "Split: Actions": {
+      "main": [
+        [
+          {
+            "node": "Airtable: User per Rolle finden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable: User per Rolle finden": {
       "main": [
         [
           {
