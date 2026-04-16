@@ -1,0 +1,18 @@
+﻿Name,Role,Department,Email,Phone,Active,Actions Assigned (count),Waste Logged (count),Action Items,Waste Observations
+Jessica Lee,Manager,Operations,jessica.lee@company.com,+1-555-123-4567,checked,1,1,Prepare Q2 financial report,Overflowing Trash Bin
+Michael Chen,Technician,Maintenance,michael.chen@company.com,+1-555-234-5678,checked,1,1,Update employee handbook,Improper Chemical Disposal
+Priya Patel,Analyst,Finance,priya.patel@company.com,+1-555-345-6789,checked,1,1,Schedule team building event,Cardboard Not Recycled
+David Kim,Supervisor,Production,david.kim@company.com,+1-555-456-7890,checked,1,1,Conduct client satisfaction survey,Food Waste in Hallway
+Emily Johnson,Coordinator,Logistics,emily.johnson@company.com,+1-555-567-8901,checked,1,1,Finalize Q3 project roadmap,Broken Glass in Trash
+Carlos Ramirez,Operator,Production,carlos.ramirez@company.com,+1-555-678-9012,,1,1,Renew software licenses,Overflowing Recycling Bin
+Sara Ahmed,Engineer,Engineering,sara.ahmed@company.com,+1-555-789-0123,checked,1,1,Organize safety training session,Unlabeled Waste Drum
+Brian Smith,Technician,Maintenance,brian.smith@company.com,+1-555-890-1234,checked,1,1,Prepare monthly newsletter,Plastic Bottles in Trash
+Linda Wu,Manager,Quality Assurance,linda.wu@company.com,+1-555-901-2345,checked,1,1,Review vendor contracts,Spilled Oil on Floor
+James O'Connor,Analyst,Finance,james.oconnor@company.com,+1-555-012-3456,,1,1,Implement new onboarding process,E-Waste in Regular Bin
+Anna Müller,Coordinator,Logistics,anna.muller@company.com,+1-555-123-9876,checked,1,1,Audit inventory levels,Compost Bin Contaminated
+Mohammed Al-Farsi,Supervisor,Production,mohammed.alfarsi@company.com,+1-555-234-8765,checked,1,1,Plan annual company retreat,Medical Waste in Trash
+Sophie Dubois,Engineer,Engineering,sophie.dubois@company.com,+1-555-345-7654,checked,1,1,Update website content,Overflowing Dumpster
+Lucas Rossi,Operator,Production,lucas.rossi@company.com,+1-555-456-6543,checked,1,1,Develop customer FAQ page,Paint Cans in Waste Bin
+Olivia Brown,Manager,Operations,olivia.brown@company.com,+1-555-567-5432,checked,1,1,Test backup and recovery procedures,Batteries in Trash
+Thomas Hoefner,OpEx,Operational Excellence,thoefner-ext@hu.wocogroup.com,+49 172 911 5972,checked,0,2,,"Unnamed record,Unnamed record"
+Sándor Gál,Production Manager,Production,sgal@hu.wocogroup.com,,checked,0,0,,
